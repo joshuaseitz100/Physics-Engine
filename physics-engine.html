@@ -1,0 +1,1726 @@
+<!DOCTYPE>
+<html>
+<head>
+<script type="text/javascript">
+var NumberOfSpritesPerTeam = 10;
+var VelocityOfSprites = 3;
+var SpeedOfProjectiles = 6;
+var RadiusOfSprites = 4;
+var MillisecondsBetweenFrames = 20;
+var FramesRequiredToRecoil = 5;
+
+var NumberOfTeams = 1;
+
+var GravitationalConstant = 10;
+var MassOfSprites = 1;
+var EquilibriumDistance = 30;
+var FieldFriction = 0.001;
+
+var StickyBoundries = true;
+var ShowCenterOfMass = false;
+var ShowHighlight = false;
+var ShowTrails = false;
+var UseForce = true;
+
+var Boundary;
+var Teams;
+var Sprites;
+var Projectiles = new Array();
+
+var EngineTimer;
+
+var UpKeyDown = false;
+var RightKeyDown = false;
+var DownKeyDown = false;
+var LeftKeyDown = false;
+var SpaceKeyDown = false;
+var BKeyDown = false;
+
+var CustomForceOperationUnit = null;
+
+function NewSprite(SpriteTeam) {
+  var Sprite = new Object();
+  Sprite.Team = SpriteTeam;
+  Sprite.Health = 100; // 0%-100%
+  Sprite.UnlimitedAmmo = true;
+  Sprite.Ammo = 0;
+  Sprite.FramesSinceProjectileFired = 0;
+  Sprite.Radius = RadiusOfSprites; // Integer 
+  var SpritePositionX = Math.random() * (Boundary.Size.Width - Sprite.Radius * 2) + Sprite.Radius;
+  var SpritePositionY = Math.random() * (Boundary.Size.Height - Sprite.Radius * 2) + Sprite.Radius;
+  Sprite.Position = GetNewPosition(SpritePositionX, SpritePositionY);
+  //// NOTEAM
+  //Sprite.Velocity = GetNewVelocity(Math.random() * 360, 0);
+  Sprite.Velocity = GetNewVelocity(Math.random() * 360, VelocityOfSprites);
+  Sprite.Mass = MassOfSprites;
+  Sprite.HTML_Object;
+  Sprite.Dead = false;
+  Sprite.TargetSprite;
+  
+  Sprite.HasTargetSprite = function() {
+    return (this.TargetSprite);
+  }
+
+  Sprite.SetTargetSprite = function() {
+    // Set target enemy to nearest killable enemy Sprite.
+    // Sets target enemy to null if no enemy found.
+    // Returns target enemy.
+    // Sets initial distance to highest value possible. This way it can be reduced to the lowest number as it analyzes each target.
+    var DistanceToNearestKillableEnemySprite = Number.MAX_VALUE;
+
+    var NearestKillableEnemySprite = null;
+    for (var i = 0; i < Sprites.length; i++) {
+      var SpriteBeingEvaluated = Sprites[i];
+      if (SpriteBeingEvaluated.Team == this.Team.KillableEnemyTeam) {
+        var DistanceToSpriteBeingEvaluated = GetDistanceBetweenPositions(this.Position, SpriteBeingEvaluated.Position);
+        if (DistanceToSpriteBeingEvaluated < DistanceToNearestKillableEnemySprite) {
+          DistanceToNearestKillableEnemySprite = DistanceToSpriteBeingEvaluated;
+          NearestKillableEnemySprite = SpriteBeingEvaluated;
+        }
+      }
+    }
+    this.TargetSprite = NearestKillableEnemySprite;
+    return this.TargetSprite;
+  }
+
+  Sprite.SetDirectionAccordingToTargetSprite = function() {
+    this.Velocity.Angle = GetPolorAngleOfVectorSpanningPositionsInDegrees(this.Position, this.TargetSprite.Position);
+  }
+
+  Sprite.StopMoving = SharedMethodStopMoving;
+  Sprite.MoveAccordingToPositionAndVelocity = SharedMethodMoveAccordingToPositionAndVelocity;
+  Sprite.UpdateHTML_ObjectAccordingToPositionAndRadius = SharedMethodUpdateHTML_ObjectAccordingToPositionAndRadius;
+  Sprite.CheckPotentialBoundaryBreachAccordingToPositionAndVelocity = SharedMethodCheckPotentialBoundaryBreachAccordingToPositionAndVelocity;
+
+  return Sprite;
+}
+
+// *********************** METHODS SHARED ACROSS OBJECTS ***********************
+
+function SharedMethodCheckPotentialBoundaryBreachAccordingToPositionAndVelocity() {
+  var hasHitBoundary = false;
+  var TestPosition = GetNewPosition(0, 0);
+  TestPosition.X = this.Position.X + this.Velocity.Speed * cos(DegreesToRadians(this.Velocity.Angle));
+  TestPosition.Y = this.Position.Y + this.Velocity.Speed * sin(DegreesToRadians(this.Velocity.Angle));
+  // Check X-boundary breach and flip X position and velocity appropriately.
+  if (TestPosition.X <= this.Radius) {
+    FlipPositionAboutAnX_Axis(this.Position, this.Radius);
+    this.Position.X = this.Position.X + 2;
+    FlipVelocityAboutX_Axis(this.Velocity);
+    hasHitBoundary = true;
+  } else if (TestPosition.X >= Boundary.Size.Width - this.Radius) {
+    FlipPositionAboutAnX_Axis(this.Position, Boundary.Size.Width - this.Radius);
+    this.Position.X = this.Position.X - 2;
+    FlipVelocityAboutX_Axis(this.Velocity);
+    hasHitBoundary = true;
+  } 
+  // Reset test position based on new position and velocity.
+  TestPosition.X = this.Position.X + this.Velocity.Speed * cos(DegreesToRadians(this.Velocity.Angle));
+  TestPosition.Y = this.Position.Y + this.Velocity.Speed * sin(DegreesToRadians(this.Velocity.Angle));
+  // Check Y-boundary breach and flip Y position and velocity appropriately.
+  if (TestPosition.Y <= this.Radius) {
+    FlipPositionAboutAnY_Axis(this.Position, this.Radius);
+    this.Position.Y = this.Position.Y + 2;
+    FlipVelocityAboutY_Axis(this.Velocity);
+    hasHitBoundary = true;
+  } else if (TestPosition.Y >= Boundary.Size.Height - this.Radius) {
+    FlipPositionAboutAnY_Axis(this.Position, Boundary.Size.Height - this.Radius);
+    this.Position.Y = this.Position.Y - 2;
+    FlipVelocityAboutY_Axis(this.Velocity);
+    hasHitBoundary = true;
+  }
+
+  if (hasHitBoundary && StickyBoundries) {
+    this.Velocity.Speed = 0;
+  }
+
+  // Dampener
+  if (hasHitBoundary) {
+    this.Velocity.Speed = this.Velocity.Speed * 0.9;
+  }
+}
+
+function SharedMethodMoveAccordingToPositionAndVelocity() {
+  this.Position.X = this.Position.X + this.Velocity.Speed * cos(DegreesToRadians(this.Velocity.Angle));
+  this.Position.Y = this.Position.Y + this.Velocity.Speed * sin(DegreesToRadians(this.Velocity.Angle));
+}
+
+function SharedMethodUpdateHTML_ObjectAccordingToPositionAndRadius() {
+  if (ShowTrails) {
+    CreateSpriteGraphics(this);
+  }
+
+  this.HTML_Object.style.top = this.Position.Y - this.Radius;
+  this.HTML_Object.style.left = this.Position.X - this.Radius;
+}
+
+function SharedMethodStopMoving() {
+  this.Velocity.Speed = 0;
+  this.Velocity.Angle = 0;
+}
+
+// ********************* END METHODS SHARED ACROSS OBJECTS *********************
+
+function OnLoading() {
+  // Instantiate Objects.
+  InstantiateBoundary();
+  InstantiateTeams();
+  InstantiateSprites();
+  // Create Boundary Visuals.
+  SetBoundaryHTMLStyle();
+
+
+  var numberOfFramesToSkip = GetNumberOfFramesToSkipTextboxValue();
+  for (var i = 0; i < numberOfFramesToSkip; i++) {
+    document.getElementById("SkippedPercentageLabel").innerHTML = Math.round(i * 100 / numberOfFramesToSkip).toString() + "%";
+    EngineBody();
+  }
+  document.getElementById("SkippedPercentageLabel").innerHTML = "";
+
+  // Create Engine
+  CreateEngine();
+
+  //if (ShowHighlight) {
+  //  Sprites[0].HTML_Object.style.backgroundColor = "#FF0000";
+  //}
+
+
+  CenterOfMassGraphic = null;
+  document.getElementById("PlayPauseButton").innerHTML = "Pause"
+
+
+  document.onkeydown = function (keyPressed) {
+
+    //alert(keyPressed.keyCode);
+
+    if (keyPressed.keyCode == 37) { // Left
+      LeftKeyDown = true;
+    } else if (keyPressed.keyCode == 38) { // Up
+      UpKeyDown = true;
+    } else if (keyPressed.keyCode == 39) { // Right
+      RightKeyDown = true;
+    } else if (keyPressed.keyCode == 40) { // Down
+      DownKeyDown = true;
+    }  else if (keyPressed.keyCode == 32) { // Space
+      SpaceKeyDown = true;
+    } else if (keyPressed.keyCode == 66) { // B
+      BKeyDown = true;
+    }
+  };
+
+  document.onkeyup = function (keyPressed) {
+
+    //alert(keyPressed.keyCode);
+
+    if (keyPressed.keyCode == 37) { // Left
+      LeftKeyDown = false;
+    } else if (keyPressed.keyCode == 38) { // Up
+      UpKeyDown = false;
+    } else if (keyPressed.keyCode == 39) { // Right
+      RightKeyDown = false;
+    } else if (keyPressed.keyCode == 40) { // Down
+      DownKeyDown = false;
+    } else if (keyPressed.keyCode == 32) { // Space
+      SpaceKeyDown = false;
+    } else if (keyPressed.keyCode == 66) { // B
+      BKeyDown = false;
+    }
+  };
+
+
+
+  var customForceFormulaString = GetCustomFormulaTextboxValue();
+  CustomForceOperationUnit = GetFormulaOperationUnit(customForceFormulaString);
+}
+
+function InstantiateBoundary() {
+  Boundary = new Object();
+  Boundary.Size = GetNewSize(600, 400);
+  Boundary.RicochetsProjectiles = false;
+}
+
+function InstantiateTeams() {
+  Teams = new Array();
+  for (var i = 0; i <= NumberOfTeams - 1; i++) {
+    Teams[i] = InstantiateTeam(i);
+  }
+  // Set Killable and Attacking Enemy Teams.
+  if (NumberOfTeams > 1) {
+    for (var i = 0; i <= NumberOfTeams - 1; i++) {
+      var KillableEnemyTeamIndex = i + 1;
+      if (KillableEnemyTeamIndex > NumberOfTeams - 1) {
+        KillableEnemyTeamIndex = 0;
+      }
+      Teams[i].KillableEnemyTeam = Teams[KillableEnemyTeamIndex];
+      var AttackingEnemyTeamIndex = i - 1;
+      if (AttackingEnemyTeamIndex < 0) {
+        AttackingEnemyTeamIndex = NumberOfTeams - 1;
+      }
+      Teams[i].AttackingEnemyTeam = Teams[AttackingEnemyTeamIndex];
+    }
+  }
+}
+
+function InstantiateTeam(Index) {
+  var Team = new Object();
+  Team.Name = "Team" + (Index + 1).toString();
+  // Image
+  Team.SpriteIconURL = Team.Name + ".png";
+  // Color
+  var teamColor;
+  switch (Index) {
+    case 0:
+      teamColor = "#00FF00";
+      break;
+    case 1:
+      teamColor = "#FF0000";
+      break;
+    case 2:
+      teamColor = "#0000FF";
+      break;
+    case 3:
+      teamColor = "#FFFF00";
+      break;
+    case 4:
+      teamColor = "#00FFFF";
+      break;
+    case 5:
+      teamColor = "#FF8800";
+      break;
+    case 6:
+      teamColor = "#FF8888";
+      break;
+    case 7:
+      teamColor = "#888888";
+      break;
+  }
+
+  if (NumberOfTeams == 1) {
+    teamColor = "#000000";
+  }
+
+  Team.Color = teamColor;
+
+  Team.KillableEnemyTeam;
+  Team.AttackingEnemyTeam;
+  Team.ProjectileEquipped = true;
+  Team.ProjectileHealthDeduction = 100; 
+  Team.StabHealthDeduction = 100;
+  return Team;
+}
+
+function InstantiateSprites() {
+  Sprites = new Array();
+  for (var i = 0; i <= NumberOfTeams - 1; i++) {
+    for (var j = 0; j < NumberOfSpritesPerTeam; j++) {
+      var SpriteIndex = i * NumberOfSpritesPerTeam + j;
+      Sprites[SpriteIndex] = InstantiateSprite(Teams[i]);
+    }
+  }
+}
+
+function InstantiateSprite(SpriteTeam) {
+  var Sprite = NewSprite(SpriteTeam);
+
+  CreateSpriteGraphics(Sprite);
+  return Sprite;
+}
+
+function NewProjectile(NewPosition, NewVelocity, NewOriginTeam) {
+  var Projectile = new Object();
+  Projectile.Position = NewPosition;
+  Projectile.Velocity = NewVelocity;
+  Projectile.Radius = 1;
+  Projectile.HealthDeduction = 100;
+  Projectile.OriginTeam = NewOriginTeam;
+  Projectile.HTML_Object;
+  return Projectile;
+}
+
+function InstantiateProjectile(NewPosition, NewVelocity, NewOriginTeam) {
+  var Projectile = NewProjectile(NewPosition, NewVelocity, NewOriginTeam);
+  CreateProjectileHTML_Object(Projectile);
+  return Projectile;
+}
+
+function GetNewPosition(NewX, NewY) { // Position will represent location of center of object.
+  var NewPosition = new Object();
+  NewPosition.X = NewX; // Float
+  NewPosition.Y = NewY; // Float
+  return NewPosition;
+}
+
+function GetNewVelocity(NewAngle, NewSpeed) {
+  var NewVelocity = new Object();
+  NewVelocity.Angle = NewAngle; // Float - Degrees (0-360)
+  NewVelocity.Speed = NewSpeed; // Float - Pixels per Frame
+  return NewVelocity;
+}
+
+function GetNewSize(NewWidth, NewHeight) {
+  var NewSize = new Object();
+  NewSize.Width = NewWidth;
+  NewSize.Height = NewHeight;
+  return NewSize;
+}
+
+function SetBoundaryHTMLStyle() {
+  var DivBoundary = document.getElementById("DivBoundary");
+  DivBoundary.style.width = Boundary.Size.Width;
+  DivBoundary.style.height = Boundary.Size.Height;
+}
+
+function CreateSpriteGraphics(Sprite) {
+  // Image
+  //var ImgSprite = document.createElement("IMG");
+  //ImgSprite.src = Sprite.Team.SpriteIconURL;
+  //ImgSprite.style.position = "absolute";
+  //ImgSprite.style.width = Sprite.Radius * 2;
+  //ImgSprite.style.height = Sprite.Radius * 2;
+  //ImgSprite.style.top = Sprite.Position.Y - Sprite.Radius;
+  //ImgSprite.style.left = Sprite.Position.X - Sprite.Radius;
+  //Sprite.HTML_Object = ImgSprite;
+
+  // Div
+  var ImgSprite = document.createElement("div");
+  ImgSprite.style.backgroundColor = Sprite.Team.Color;
+  ImgSprite.style.borderRadius = Sprite.Radius.toString() + "px";
+  ImgSprite.style.position = "absolute";
+  ImgSprite.style.width = Sprite.Radius * 2;
+  ImgSprite.style.height = Sprite.Radius * 2;
+  ImgSprite.style.top = Sprite.Position.Y - Sprite.Radius;
+  ImgSprite.style.left = Sprite.Position.X - Sprite.Radius;
+  Sprite.HTML_Object = ImgSprite;
+
+  AppendHTMLObjectToDivBoundary(Sprite.HTML_Object)
+}
+
+function CreateProjectileHTML_Object(Projectile) {
+  var DivProjectile = document.createElement("DIV");
+  DivProjectile.style.position = "absolute";
+  DivProjectile.style.width = Projectile.Radius * 2;
+  DivProjectile.style.height = Projectile.Radius * 2;
+  DivProjectile.style.top = Projectile.Position.Y - Projectile.Radius;
+  DivProjectile.style.left = Projectile.Position.X - Projectile.Radius;
+  DivProjectile.style.border = "solid 1px #000";
+  Projectile.HTML_Object = DivProjectile;
+
+  AppendHTMLObjectToDivBoundary(Projectile.HTML_Object)
+}
+
+function CreateEngine() {
+  EngineTimer = setInterval(EngineBody, MillisecondsBetweenFrames);
+}
+
+var aaaaabbbbb = 0;
+
+// **************************************** ENGINE BODY ****************************************
+function EngineBody() {
+  SetVelocityOfAllSprites();
+  MoveAllSprites();
+  //CheckAbilityToFireProjectileForAllSprites();
+  //// NOTEAM
+  CheckKillsForAllSprites();
+  RenderSpecialGraphics();
+}
+// ************************************** END ENGINE BODY **************************************
+
+function SetVelocityOfAllSprites() {
+  if (!UseForce) {
+    SetVelocityOfAllSpritesBasedOnAi();
+  } else {
+    SetVelocityOfAllSpritesBasedOnForce();
+  }
+
+  ManipulateVelocityOfSprites();
+}
+
+function SetVelocityOfAllSpritesBasedOnAi() {
+  for (var i = 0; i < Sprites.length; i++) {
+    var Sprite = Sprites[i];
+    // if seeking target
+    Sprite.SetTargetSprite();
+    if (Sprite.HasTargetSprite()) {
+      Sprite.SetDirectionAccordingToTargetSprite();
+    } else {
+      //Sprite.StopMoving(); // So cruel!
+    }
+  }
+}
+
+function SetVelocityOfAllSpritesBasedOnForce() {
+  for (var i = 0; i < Sprites.length; i++) {
+    var Sprite = Sprites[i];
+
+    // Find net force on Sprite.
+    var netForceX = 0;
+    var netForceY = 0;
+    for (var j = 0; j < Sprites.length; j++) {
+      if (i != j) {
+        var otherSprite = Sprites[j];
+
+        var distance = GetDistanceBetweenPositions(Sprite.Position, otherSprite.Position);
+
+
+	//// For Gravity
+        //var gravityForceIJ = GravitationalConstant * Sprite.Mass * otherSprite.Mass / pow(distance, 2);
+
+        //// TO DO: Make this better!  This is cheating!!!
+        ////if (distance < 10) {
+        ////  gravityForceIJ = gravityForceIJ * 0.01 * (distance / 10);
+        ////}
+
+
+	//// For Special Force
+        //var gravityForceIJ = GravitationalConstant * Sprite.Mass * otherSprite.Mass * (distance - EquilibriumDistance) / pow(distance, 3);
+        ////var gravityForceIJ = GravitationalConstant * Sprite.Mass * otherSprite.Mass * distance * 0.000001;
+
+	
+        // For Custom Force
+        var constants = new ConstantsObject(distance, GravitationalConstant, Sprite.Mass, otherSprite.Mass, EquilibriumDistance);
+        var gravityForceIJ = CustomForceOperationUnit.Evaluate(constants);
+
+
+
+//        var gravityForceIJTest = GravitationalConstant * Sprite.Mass * otherSprite.Mass * (distance - EquilibriumDistance) / pow(distance, 3);
+//        if (gravityForceIJ != gravityForceIJTest) {
+//          alert("gravityForceIJ : " + gravityForceIJ + " gravityForceIJTest : " + gravityForceIJTest);
+//        }
+
+
+
+	// Safety
+        if (gravityForceIJ < -0.1) {
+	  gravityForceIJ = -0.1;
+	}
+ 
+	//if (distance < Sprite.Radius + otherSprite.Radius && gravityForceIJ > 0) {
+        //  gravityForceIJ = -0.025
+	//}
+	if (distance < Sprite.Radius + otherSprite.Radius) {
+          gravityForceIJ = -0.025
+	}
+
+        netForceX += gravityForceIJ * cos(DegreesToRadians(GetPolorAngleOfVectorSpanningPositionsInDegrees(Sprite.Position, otherSprite.Position)));
+        netForceY += gravityForceIJ * sin(DegreesToRadians(GetPolorAngleOfVectorSpanningPositionsInDegrees(Sprite.Position, otherSprite.Position)));
+
+	// Gravity
+        //netForceY += GravitationalConstant * 0.00001;
+
+      }
+    }
+
+    // Set velocity based on net force.
+    var time = MillisecondsBetweenFrames;
+    var velocityX = Sprite.Velocity.Speed * cos(DegreesToRadians(Sprite.Velocity.Angle));
+    var velocityY = Sprite.Velocity.Speed * sin(DegreesToRadians(Sprite.Velocity.Angle));
+    var accelerationX = netForceX / Sprite.Mass;
+    var accelerationY = netForceY / Sprite.Mass;
+    velocityX += accelerationX * time;
+    velocityY += accelerationY * time;
+
+    Sprite.Velocity.Speed = GetHypotenuseOfTriangle(velocityX, velocityY);
+    Sprite.Velocity.Angle = GetAngleOfTriangle(velocityX, velocityY);
+
+    // Field Friction
+    Sprite.Velocity.Speed = Sprite.Velocity.Speed * (1 - FieldFriction);
+  }
+}
+
+function ManipulateVelocityOfSprites() {
+  var Sprite = Sprites[SpriteHighlightIndex];
+
+  var netForceX = 0;
+  var netForceY = 0;
+
+  if (LeftKeyDown) { // Left
+    netForceX = -0.01;
+  }
+  if (UpKeyDown) { // Up
+    var netForceY = -0.01;
+  }
+  if (RightKeyDown) { // Right
+    netForceX = 0.01;
+  }
+  if (DownKeyDown) { // Down
+    var netForceY = 0.01;
+  }
+  if (SpaceKeyDown) { // Space
+    if (Sprite.Velocity.Speed < 10) {
+      Sprite.Velocity.Speed = Sprite.Velocity.Speed * 1.05;
+      if (Sprite.Velocity.Speed > 10) {
+        Sprite.Velocity.Speed = 10;
+      }
+    }
+  }
+  if (BKeyDown) { // B
+    Sprite.Velocity.Speed = 0;
+  }
+
+    
+  // Set velocity based on net force.
+  var time = MillisecondsBetweenFrames;
+  var velocityX = Sprite.Velocity.Speed * cos(DegreesToRadians(Sprite.Velocity.Angle));
+  var velocityY = Sprite.Velocity.Speed * sin(DegreesToRadians(Sprite.Velocity.Angle));
+  var accelerationX = netForceX / Sprite.Mass;
+  var accelerationY = netForceY / Sprite.Mass;
+  velocityX += accelerationX * time;
+  velocityY += accelerationY * time;
+
+  Sprite.Velocity.Speed = GetHypotenuseOfTriangle(velocityX, velocityY);
+  Sprite.Velocity.Angle = GetAngleOfTriangle(velocityX, velocityY);
+
+}
+
+function MoveAllSprites() {
+  for (var i = 0; i < Sprites.length; i++) {
+    var Sprite = Sprites[i];
+    Sprite.CheckPotentialBoundaryBreachAccordingToPositionAndVelocity();
+    Sprite.MoveAccordingToPositionAndVelocity();
+    Sprite.UpdateHTML_ObjectAccordingToPositionAndRadius();
+  }
+}
+
+function CheckAbilityToFireProjectileForAllSprites() {
+  for (var i = 0; i < Sprites.length; i++) {
+    var Sprite = Sprites[i]; 
+    if (Sprite.Team.ProjectileEquipped && 
+       (Sprite.UnlimitedAmmo || Sprite.Ammo > 0) && 
+       (Sprite.FramesSinceProjectileFired >= FramesRequiredToRecoil)) {
+      var NewPositionX = Sprite.Position.X + Sprite.Radius * cos(Sprite.Velocity.Angle);
+      var NewPositionY = Sprite.Position.Y + Sprite.Radius * sin(Sprite.Velocity.Angle);
+      var NewPosition = GetNewPosition(NewPositionX, NewPositionY);
+      var NewVelocity = GetNewVelocity(Sprite.Velocity.Angle, SpeedOfProjectiles);
+      var Projectile = InstantiateProjectile(NewPosition, NewVelocity, Sprite.Team);
+      Sprite.FramesSinceProjectileFired = 0;
+    }
+    Sprite.FramesSinceProjectileFired = Sprite.FramesSinceProjectileFired + 1;
+  }
+}
+
+function CheckKillsForAllSprites() {
+  CheckStabKillsForAllSprites();
+  ExecuteDeadSprites();
+}
+
+function CheckStabKillsForAllSprites() {
+  for (var i = 0; i < Sprites.length; i++) {
+    for (var j = i + 1; j < Sprites.length; j++) {
+      var SpriteA = Sprites[i];
+      var SpriteB = Sprites[j];
+      var DistanceBetweenCenters = GetDistanceBetweenPositions(SpriteA.Position, SpriteB.Position);
+      if (DistanceBetweenCenters <= SpriteA.Radius + SpriteB.Radius && SpriteA.Team != SpriteB.Team) {
+        if (SpriteA.Team.KillableEnemyTeam == SpriteB.Team) {
+          SpriteB.Dead = true;
+        }
+        if (SpriteB.Team.KillableEnemyTeam == SpriteA.Team) {
+          SpriteA.Dead = true;
+        }
+      }
+    }
+  }
+}
+
+function ExecuteDeadSprites() {
+  var DeadSpriteFound = true;
+  while (DeadSpriteFound) {
+    DeadSpriteFound = false;
+    var i = 0;
+    while (i < Sprites.length && DeadSpriteFound == false) {
+      var Sprite = Sprites[i];
+      if (Sprite.Dead && !DeadSpriteFound) {
+        RemoveHTMLObjectFromDivBoundary(Sprite.HTML_Object);
+        Sprites.splice(i, 1);
+        DeadSpriteFound = true;
+      }   
+      // Must increment.
+      i++;
+    }
+  }
+}
+
+function RenderSpecialGraphics() {
+  if (ShowCenterOfMass) {
+    RenderCenterOfMassGraphics();
+  }
+}
+
+var CenterOfMassGraphic;
+
+function GetCenterOfMassGraphic() {
+  if (CenterOfMassGraphic != null) {
+    return CenterOfMassGraphic;
+  }
+
+  // Div
+  var ImgSprite = document.createElement("div");
+  ImgSprite.style.backgroundColor = "#00FF00";
+  ImgSprite.style.borderRadius = RadiusOfSprites.toString() + "px";
+  ImgSprite.style.position = "absolute";
+  ImgSprite.style.width = RadiusOfSprites * 2;
+  ImgSprite.style.height = RadiusOfSprites * 2;
+
+  AppendHTMLObjectToDivBoundary(ImgSprite);
+
+  CenterOfMassGraphic = ImgSprite;
+}
+
+function RenderCenterOfMassGraphics() {
+  var graphic = GetCenterOfMassGraphic();
+
+  if (!(graphic)) {
+    return;
+  }
+
+  var xSum = 0;
+  var ySum = 0;
+  var massSum = 0;
+
+  for (var i = 0; i < Sprites.length; i++) {
+    xSum = xSum + Sprites[i].Position.X * Sprites[i].Mass;
+    ySum = ySum + Sprites[i].Position.Y * Sprites[i].Mass;
+    massSum = massSum + Sprites[i].Mass;
+  }
+
+  var xCom = xSum / massSum;
+  var yCom = ySum / massSum;
+
+
+  graphic.style.left = xCom - RadiusOfSprites;
+  graphic.style.top = yCom - RadiusOfSprites;
+}
+
+// **************************** UTILITY FUNCTIONALITY ****************************
+
+function FlipPositionAboutAnX_Axis(Position, X_AxisX) {
+  var DeltaX = Position.X - X_AxisX;
+  if (DeltaX >= 0) {
+    Position.X = Position.X - abs(DeltaX) * 2;
+  } else {
+    Position.X = Position.X + abs(DeltaX) * 2;
+  }
+}
+
+function FlipPositionAboutAnY_Axis(Position, Y_AxisY) {
+  var DeltaY = Position.Y - Y_AxisY;
+  if (DeltaY >= 0) {
+    Position.Y = Position.Y - abs(DeltaY) * 2;
+  } else {
+    Position.Y = Position.Y + abs(DeltaY) * 2;
+  }
+}
+
+function FlipVelocityAboutX_Axis(Velocity) {
+  Velocity.Angle = 180 - Velocity.Angle;
+}
+
+function FlipVelocityAboutY_Axis(Velocity) {
+  Velocity.Angle = 360 - Velocity.Angle;
+}
+
+function GetDistanceBetweenPositions(PositionA, PositionB) {
+  var DeltaX = PositionB.X - PositionA.X;
+  var DeltaY = PositionB.Y - PositionA.Y;
+  return GetHypotenuseOfTriangle(DeltaX, DeltaY);
+}
+
+function GetPolorAngleOfVectorSpanningPositionsInDegrees(PositionA, PositionB) {
+  var DeltaX = PositionB.X - PositionA.X;
+  var DeltaY = PositionB.Y - PositionA.Y;
+  return GetAngleOfTriangle(DeltaX, DeltaY);
+}
+
+function GetHypotenuseOfTriangle(sideA, sideB) {
+  return sqrt(pow(sideA, 2) + pow(sideB, 2));
+}
+
+function GetAngleOfTriangle(sideX, sideY) {
+  var Angle = null;
+
+  if (sideX == 0) {
+    Angle = 0;
+  } else if (sideX > 0) {
+    Angle = RadiansToDegrees(arctan(sideY / sideX));
+  } else if (sideX < 0) {
+    Angle = RadiansToDegrees(arctan(sideY / sideX)) + 180;
+  }
+  return Angle;
+}
+
+function AppendHTMLObjectToDivBoundary(HTML_Object) {
+  var DivBoundary = document.getElementById("DivBoundary");
+  DivBoundary.appendChild(HTML_Object);
+}
+
+function RemoveHTMLObjectFromDivBoundary(HTML_Object) {
+  var DivBoundary = document.getElementById("DivBoundary");
+  DivBoundary.removeChild(HTML_Object);
+}
+
+// **************************** HELPER FUNCTIONALITY ****************************
+
+function DegreesToRadians(Angle) {
+  return Angle * Math.PI / 180;
+}
+
+function RadiansToDegrees(Angle) {
+  return Angle * 180 / Math.PI;
+}
+
+function sin(Angle) {
+  return Math.sin(Angle);
+}
+
+function cos(Angle) {
+  return Math.cos(Angle);
+}
+
+function arctan(Tangent) {
+  return Math.atan(Tangent)
+}
+
+function sqrt(Number) {
+  return Math.sqrt(Number);
+}
+
+function pow(Number, Power) {
+  return Math.pow(Number, Power);
+}
+
+function abs(Number, Power) {
+  return Math.abs(Number, Power);
+}
+
+// **************************** FORMULA FUNCTIONALITY ****************************
+
+var NumberArgumentType = "Number";
+var ConstantArgumentType = "Constant";
+var OperationArgumentType = "Operation";
+var ParentheisArgumentType = "Parentheis";
+var OperationUnitArgumentType = "OperationUnit";
+
+function OperationUnit(leftArgument, leftArgumentType, rightArgument, rightArgumentType, operation) { // number, constant, or OperationUnit; number, constant, or OperationUnit; character
+  this.LeftArgument = leftArgument;
+  this.LeftArgumentType = leftArgumentType;
+  this.RightArgument = rightArgument;
+  this.RightArgumentType = rightArgumentType;
+  this.Operation = operation;
+
+  this.Evaluate = EvaluateOperationUnit;
+}
+
+function EvaluateOperationUnit(constants) {
+  var result = null;
+
+  var leftArgument = this.LeftArgument;
+  var rightArgument = this.RightArgument;
+
+  if (this.LeftArgumentType == OperationUnitArgumentType) {
+    leftArgument = this.LeftArgument.Evaluate(constants);
+  } else if (this.LeftArgumentType == ConstantArgumentType) {
+    leftArgument = GetNumberForConstant(leftArgument, constants);
+  }
+
+  if (this.RightArgumentType == OperationUnitArgumentType) {
+    rightArgument = this.RightArgument.Evaluate(constants);
+  } else if (this.RightArgumentType == ConstantArgumentType) {
+    rightArgument = GetNumberForConstant(rightArgument, constants);
+  }
+
+  if (this.Operation == "^") {
+    result = pow(leftArgument, rightArgument);  
+  } else if (this.Operation == "*") {
+    result = leftArgument * rightArgument;  
+  } else if (this.Operation == "/") {
+    result = leftArgument / rightArgument;  
+  } else if (this.Operation == "+") {
+    result = leftArgument + rightArgument;  
+  } else if (this.Operation == "-") {
+    result = leftArgument - rightArgument;  
+  }
+
+  return result;
+}
+
+function GetNumberForConstant(argument, constants) {
+  var result = null;
+
+  if (argument == "d") {
+    result = constants.Distance;
+  } else if (argument == "G") {
+    result = constants.GravitationalConstant;
+  } else if (argument == "m1") {
+    result = constants.Mass1;
+  } else if (argument == "m2") {
+    result = constants.Mass2;
+  } else if (argument == "P") {
+    result = constants.EquilibriumDistance;
+  }
+
+  return result;
+}
+
+function ConstantsObject(distance, gravitationalConstant, mass1, mass2, equilibriumDistance) {
+  this.Distance = distance;
+  this.GravitationalConstant = gravitationalConstant;
+  this.Mass1 = mass1;
+  this.Mass2 = mass2;
+  this.EquilibriumDistance = equilibriumDistance;
+}
+
+//var formula = "G * m1 * m2 * (d - P) / d ^ 3";
+
+var NumberTokenType = "Number";
+var ConstantTokenType = "Constant";
+var OperationTokenType = "Operation";
+var ParentheisTokenType = "Parentheis";
+
+function Token(tokenString, tokenType) {
+  this.TokenString = tokenString;
+  this.TokenType = tokenType;
+
+  this.Equals = EqualsToken;
+}
+
+function EqualsToken(otherToken) {
+  if (!(otherToken instanceof Token)) {
+    return false;
+  }
+
+  var result = false;
+
+  if (this.TokenString == otherToken.TokenString && this.TokenType == otherToken.TokenType) {
+    result = true;
+  }
+
+  return result;
+}
+
+var ExponentOperationToken = new Token("^", OperationTokenType);
+var MultiplyOperationToken = new Token("*", OperationTokenType);
+var DivideOperationToken = new Token("/", OperationTokenType);
+var AddOperationToken = new Token("+", OperationTokenType);
+var SubtractOperationToken = new Token("-", OperationTokenType);
+
+var ExponentOperationTokenList = [ExponentOperationToken];
+var MultiplyDivideOperationTokenList = [MultiplyOperationToken, DivideOperationToken];
+var AddSubtractOperationTokenList = [AddOperationToken, SubtractOperationToken];
+
+var LeftParenthesisToken = new Token("(", ParentheisTokenType);
+var RightParenthesisToken = new Token(")", ParentheisTokenType);
+
+var ParentheisTokenList = [LeftParenthesisToken, RightParenthesisToken];
+
+// b.slice(0, 2).concat(b.slice(3, 5))
+
+function GetFormulaOperationUnit(formula) {
+  var result = null;
+
+  var formulaTokenList = GetFormulaTokenList(formula);
+
+  result = GetOperationUnitFromTokenList(formulaTokenList);
+
+  return result;
+}
+
+function GetOperationUnitFromTokenList(tokenList) {
+  var result = null;
+
+  var modifiedTokenList = tokenList.copyWithin();
+
+  var firstInnermostParentheisTokenList = GetFirstInnermostParentheisTokenList(modifiedTokenList);
+  while (firstInnermostParentheisTokenList != null) {
+    var firstInnermostParentheisOperationUnit = GetOperationUnitFromTokenSubList(firstInnermostParentheisTokenList.TokenList);
+
+    var modifiedTokenList = 
+      modifiedTokenList.slice(0, firstInnermostParentheisTokenList.LeftParentheisTokenIndex)
+        .concat(firstInnermostParentheisOperationUnit)
+        .concat(modifiedTokenList.slice(firstInnermostParentheisTokenList.RightParentheisTokenIndex + 1));
+
+    firstInnermostParentheisTokenList = GetFirstInnermostParentheisTokenList(modifiedTokenList);
+  }
+
+  result = GetOperationUnitFromTokenSubList(modifiedTokenList);
+
+  return result;
+}
+
+function GetFirstInnermostParentheisTokenList(tokenList) {
+  var result = null;
+
+  var parentheisTokenIndexes = GetFirstInnermostParentheisTokenIndexes(tokenList);
+
+  if (parentheisTokenIndexes == null) {
+    return null;
+  }
+
+  var leftParentheisTokenIndex = parentheisTokenIndexes.LeftParentheisTokenIndex;
+  var rightParentheisTokenIndex = parentheisTokenIndexes.RightParentheisTokenIndex;
+
+  result = {
+    "TokenList" : tokenList.slice(leftParentheisTokenIndex + 1, rightParentheisTokenIndex),
+    "LeftParentheisTokenIndex" : leftParentheisTokenIndex,
+    "RightParentheisTokenIndex" : rightParentheisTokenIndex
+  };
+
+  return result;
+}
+
+function GetFirstInnermostParentheisTokenIndexes(tokenList) {
+  var result = null;
+
+  var leftParentheisTokenIndex = null;
+  var rightParentheisTokenIndex = null;
+
+  var level = 0;
+  var maxLevel = 0;
+  var maxLevelHandled = 0;
+
+  for (var i = 0; i < tokenList.length; i++) {
+    if (tokenList[i] instanceof Token) {
+      if (tokenList[i].Equals(LeftParenthesisToken)) {
+        level++;
+
+        if (level > maxLevel) {
+          maxLevel = level;
+        }
+
+        if (level == maxLevel && level > maxLevelHandled) {
+          leftParentheisTokenIndex = i;
+        }
+      } else if (tokenList[i].Equals(RightParenthesisToken)) {
+        if (level == maxLevel && level > maxLevelHandled) {
+          rightParentheisTokenIndex = i;
+
+            maxLevelHandled = level;
+        }
+  
+        level--;
+      }
+    }
+  }
+
+  if (leftParentheisTokenIndex != null && rightParentheisTokenIndex != null) {
+    result = {"LeftParentheisTokenIndex" : leftParentheisTokenIndex, "RightParentheisTokenIndex" : rightParentheisTokenIndex};
+  }
+
+  return result;
+}
+
+function GetOperationUnitFromTokenSubList(tokenList) {
+  var modifiedTokenList = tokenList.copyWithin();
+
+  // Exponent
+  while (DoesModifiedTokenListContainTokenInTargetTokenList(modifiedTokenList, ExponentOperationTokenList)) {
+    modifiedTokenList = GetModifiedTokenListWithOperationUnitsOfTargetOperationType(modifiedTokenList, ExponentOperationTokenList);
+  }
+
+  // Multiply Divide
+  while (DoesModifiedTokenListContainTokenInTargetTokenList(modifiedTokenList, MultiplyDivideOperationTokenList)) {
+    modifiedTokenList = GetModifiedTokenListWithOperationUnitsOfTargetOperationType(modifiedTokenList, MultiplyDivideOperationTokenList);
+  }
+
+  // Add Substact
+  while (DoesModifiedTokenListContainTokenInTargetTokenList(modifiedTokenList, AddSubtractOperationTokenList)) {
+    modifiedTokenList = GetModifiedTokenListWithOperationUnitsOfTargetOperationType(modifiedTokenList, AddSubtractOperationTokenList);
+  }
+
+  return modifiedTokenList[0];
+}
+
+function DoesModifiedTokenListContainTokenInTargetTokenList(modifiedTokenList, targetTokenList) {
+  var result = false;
+
+  for (var i = 0; i < modifiedTokenList.length; i++) {
+    for (var j = 0; j < targetTokenList.length; j++) {
+      if (modifiedTokenList[i] instanceof Token && modifiedTokenList[i].Equals(targetTokenList[j])) {
+        result = true;
+      }  
+    }  
+  }
+
+  return result;
+}
+
+function GetModifiedTokenListWithOperationUnitsOfTargetOperationType(tokenList, targetOperationTokenList) {
+  var firstTargetOperationTokenIndex = GetIndexOfFirstTargetTokenInTokenList(targetOperationTokenList, tokenList);
+
+  var firstTargetOperationOperationUnit = 
+    GetOperationUnitFromCompositeOperationUnitTokens(
+      tokenList[firstTargetOperationTokenIndex - 1],
+      tokenList[firstTargetOperationTokenIndex],
+      tokenList[firstTargetOperationTokenIndex + 1]
+    );
+
+  var modifiedTokenList = 
+    tokenList.slice(0, firstTargetOperationTokenIndex - 1)
+      .concat(firstTargetOperationOperationUnit)
+      .concat(tokenList.slice(firstTargetOperationTokenIndex + 2));
+
+  return modifiedTokenList;
+}
+
+function GetOperationUnitFromCompositeOperationUnitTokens(leftArgumentToken, operationToken, rightArgumentToken) {
+  var result = null;
+
+  var leftArgument = null;
+  var leftArgumentType = null;
+
+  if (leftArgumentToken instanceof Token) {
+    var leftOperationUnitArgument = GetOperationUnitArgumentFromToken(leftArgumentToken);
+    leftArgument = leftOperationUnitArgument.Argument;
+    leftArgumentType = leftOperationUnitArgument.ArgumentType;
+  } else if (leftArgumentToken instanceof OperationUnit) {
+    leftArgument = leftArgumentToken;
+    leftArgumentType = OperationUnitArgumentType;
+  } else {
+    alert("Houston" + "l " + typeof(leftArgumentToken));
+  }
+
+  var rightArgument = null;
+  var rightArgumentType = null;
+
+  if (rightArgumentToken instanceof Token) {
+    var rightOperationUnitArgument = GetOperationUnitArgumentFromToken(rightArgumentToken);
+    rightArgument = rightOperationUnitArgument.Argument;
+    rightArgumentType = rightOperationUnitArgument.ArgumentType;
+  } else if (rightArgumentToken instanceof OperationUnit) {
+    rightArgument = rightArgumentToken;
+    rightArgumentType = "OperationUnit";
+  } else {
+    alert("Houston" + "r " + typeof(leftArgumentToken));
+  }
+
+  var operation = operationToken.TokenString;
+
+  result = new OperationUnit(leftArgument, leftArgumentType, rightArgument, rightArgumentType, operation);
+
+  return result;
+}
+
+function GetOperationUnitFromCompositeTokens(leftArgumentToken, operationToken, rightArgumentToken) {
+  var result = null;
+
+  var leftOperationUnitArgument = GetOperationUnitArgumentFromToken(leftArgumentToken);
+  var leftArgument = leftOperationUnitArgument.Argument;
+  var leftArgumentType = leftOperationUnitArgument.ArgumentType;
+
+  var rightOperationUnitArgument = GetOperationUnitArgumentFromToken(rightArgumentToken);
+  var rightArgument = rightOperationUnitArgument.Argument;
+  var rightArgumentType = rightOperationUnitArgument.ArgumentType;
+
+  var operation = operation.TokenString;
+
+  result = OperationUnit(leftArgument, leftArgumentType, rightArgument, rightArgumentType, operation);
+
+  return result;
+}
+
+function GetOperationUnitArgumentFromToken(argumentToken) {
+  var argument = null;
+  var argumentType = argumentToken.TokenType;
+
+  if (argumentToken.TokenType == ConstantTokenType) {
+    argument = argumentToken.TokenString;
+  } else if (argumentToken.TokenType == NumberTokenType) {
+    argument = parseFloat(argumentToken.TokenString);
+  }
+
+  return {"Argument" : argument, "ArgumentType" : argumentType};
+}
+
+function GetIndexOfFirstTargetTokenInTokenList(targetTokenList, tokenList) {
+  var result = null;
+
+  for (var i = 0; i < tokenList.length; i++) {
+    for (var j = 0; j < targetTokenList.length; j++) {
+      if (result == null) {
+        if (tokenList[i] instanceof Token && tokenList[i].Equals(targetTokenList[j])) {
+          result = i;
+        }
+      }
+    }    
+  }
+
+  return result;
+}
+
+function GetFormulaTokenList(formula) {
+  if (formula == null || formula == "") {
+    return null;
+  }
+
+  var result = [];
+
+  var nextToken = GetFirstToken(formula);
+
+  if (nextToken == null) {
+    AlertFormulaMalformation();
+    return null;
+  }
+
+  result = [nextToken]
+
+  var tokenListRemainder = GetFormulaTokenList(formula.substring(nextToken.TokenString.length));
+
+  if (tokenListRemainder != null && tokenListRemainder.length > 0) {
+    result = result.concat(tokenListRemainder);
+  }
+
+  return result;
+}
+
+function GetFirstToken(formula) {
+  var result = null;
+
+  var nextTokenString = formula[0];
+  var nextTokenType = GetTokenType(nextTokenString);
+
+  if (nextTokenType == NumberTokenType) {
+    nextTokenString = GetNumberTokenStringFromFormula(formula, 0);
+  } else if (nextTokenType == ConstantTokenType) {
+    nextTokenString = GetCertainTokenStringFromFormula(formula, 0, constantList);
+  } else if (nextTokenType == OperationTokenType) {
+    nextTokenString = GetCertainTokenStringFromFormula(formula, 0, operationList);
+  } else if (nextTokenType == ParentheisTokenType) {
+    nextTokenString = GetCertainTokenStringFromFormula(formula, 0, parenthesisList);
+  } else {
+    AlertFormulaMalformation();
+  }
+
+  result = new Token(nextTokenString, nextTokenType);
+
+  return result;
+}
+
+/*
+
+function GetFormulaOperationUnit(formula) {
+  if (formula == "") {
+    return null;
+  }
+
+  var mainOperationUnit = null;
+  var leftArgument = null;
+  var leftArgumentType = null;
+  var operation = null;
+  var rightArgument = null;
+  var rightArgumentType = null;
+
+
+  var nextToken = null;
+  var marker = 0;
+
+  // Left Argument
+  var nextTokenString = formula[0];
+    
+  var nextTokenType = GetTokenType(nextTokenString);
+
+  if (nextTokenType == "Constant") {
+    nextTokenString = GetCertainTokenStringFromFormula(formula, marker, constantList);
+    leftArgument = nextTokenString;
+    leftArgumentType = "Constant";
+  } else if (nextTokenType == "Number") {
+    nextTokenString = GetNumberTokenStringFromFormula(formula, marker);
+    leftArgument = parseFloat(nextTokenString);
+    leftArgumentType = "Number";
+  } else if (nextTokenType == "Parentheis") {
+    nextTokenString = GetCertainTokenStringFromFormula(formula, marker, parenthesisList);
+  } else {
+    AlertFormulaMalformation();
+  }
+
+  marker = nextTokenString.length;
+
+  // Operation
+
+  nextTokenString = formula[marker];
+    
+  nextTokenType = GetTokenType(nextTokenString);
+
+  if (nextTokenType = "Operation") {
+    nextTokenString = GetCertainTokenStringFromFormula(formula, marker, operationList);
+    operation = nextTokenString;
+  } else {
+    AlertFormulaMalformation();
+  }
+      
+  marker = marker + nextTokenString.length;
+
+  // Right Argument
+  nextTokenString = formula[marker];
+    
+  nextTokenType = GetTokenType(nextTokenString);
+
+  if (nextTokenType == "Constant") {
+    nextTokenString = GetCertainTokenStringFromFormula(formula, marker, constantList);
+    rightArgument = nextTokenString;
+    rightArgumentType = "Constant";
+  } else if (nextTokenType == "Number") {
+    nextTokenString = GetNumberTokenStringFromFormula(formula, marker);
+    rightArgument = parseFloat(nextTokenString);
+    rightArgumentType = "Number";
+  } else if (nextTokenType == "Parentheis") {
+    nextTokenString = GetCertainTokenStringFromFormula(formula, marker, parenthesisList);
+  } else {
+    AlertFormulaMalformation();
+  }
+
+  mainOperationUnit = new OperationUnit(leftArgument, leftArgumentType, rightArgument, rightArgumentType, operation);
+
+  marker = marker + nextTokenString.length;
+  if (marker < formula.length) {
+    leftArgument = mainOperationUnit;
+    leftArgumentType = "OperationUnit";
+    var remainingFormula = formula.substring(marker);
+  }
+  
+
+  return mainOperationUnit;
+}
+
+*/
+
+function GetCertainTokenStringFromFormula(formula, startIndex, tokenList) {
+  result = null;
+
+  for (var i = 0; i < tokenList.length; i++) {
+    var match = true;
+
+
+    for (var j = 0; j < tokenList[i].length; j++) {
+      if (formula.length > j && formula[startIndex + j] != tokenList[i][j]) {
+        match = false;
+      }
+    }
+
+    if (match == true) {
+      result = tokenList[i];
+    }
+  }
+
+  return result;
+}
+
+function GetNumberTokenStringFromFormula(formula, startIndex) {
+  var result = "";
+
+  var done = false;
+
+  for (var i = startIndex; i < formula.length; i++) {
+    if (done == false) {
+      if (IsCharacterInList(formula[i], numberList) || formula[i] == ".") {
+        result = result + formula[i];
+      } else {
+        done = true;
+      }
+    }
+  }
+
+  if (result == "") {
+    result = null;
+  }
+
+  return result;
+}
+
+function AlertFormulaMalformation() {
+  alert("Sorry, something is wrong with the formula.");
+}
+
+var constantList = ["d", "G", "m1", "m2", "P"];
+var numberList = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"];
+var operationList = ["^", "*", "/", "+", "-"];
+var parenthesisList = ["(", ")"];
+
+function GetTokenType(tokenString) {
+  // Get token type. (Constant, Number, Operation, Parentheis)
+  var result = null;    
+
+  if (IsCharacterInList(tokenString, constantList)) {
+    result = "Constant";
+  } else if (IsCharacterInList(tokenString, numberList)) {
+    result = "Number";
+  } else if (IsCharacterInList(tokenString, operationList)) {
+    result = "Operation";
+  } else if (IsCharacterInList(tokenString, parenthesisList)) {
+    result = "Parentheis";
+  }
+
+  return result;
+}
+
+function IsCharacterInList(character, characterList) {
+  var result = false;
+
+  for (var i = 0; i < characterList.length; i++) {
+    if (character == characterList[i][0]) {
+      result = true;
+    }    
+  }
+
+  return result;
+}
+
+// **************************** INTERFACE FUNCTIONALITY ****************************
+function GetNumberOfTeamsTextboxValue() {
+  return parseInt(document.getElementById("NumberOfTeamsTextbox").value);
+}
+
+function GetNumberOfSpritesTextboxValue() {
+  return parseInt(document.getElementById("NumberOfSpritesTextbox").value);
+}
+
+function GetFramesPerSecondTextboxValue() {
+  return parseInt(document.getElementById("FramesPerSecondTextbox").value);
+}
+
+function GetNumberOfFramesToSkipTextboxValue() {
+  return parseInt(document.getElementById("NumberOfFramesToSkipTextbox").value);
+}
+
+function GetRadiusOfSpritesTextboxValue() {
+  return parseInt(document.getElementById("RadiusOfSpritesTextbox").value);
+}
+
+function GetMassOfSpritesTextboxValue() {
+  return parseInt(document.getElementById("MassOfSpritesTextbox").value);
+}
+
+function GetGravitationalConstantTextboxValue() {
+  return parseInt(document.getElementById("GravitationalConstantTextbox").value);
+}
+
+function GetEquilibriumDistanceTextboxValue() {
+  return parseInt(document.getElementById("EquilibriumDistanceTextbox").value);
+}
+
+function GetCustomFormulaTextboxValue() {
+  return document.getElementById("CustomFormulaTextbox").value;
+}
+
+function GetFieldFrictionTextboxValue() {
+  return parseFloat(document.getElementById("FieldFrictionTextbox").value);
+}
+
+var SpriteHighlightIndex = 0;
+
+function HighlightNextButtonClickEvent() {
+  Sprites[SpriteHighlightIndex].HTML_Object.style.backgroundColor = Sprites[SpriteHighlightIndex].Team.Color;
+
+  SpriteHighlightIndex = SpriteHighlightIndex + 1;
+  if (SpriteHighlightIndex >= Sprites.length) {
+    SpriteHighlightIndex = 0;
+  } 
+
+  Sprites[SpriteHighlightIndex].HTML_Object.style.backgroundColor = "#FF0000";
+}
+
+function HandleClearTrailButtonClickEvent() {
+  var divBoundaryDomObject = document.getElementById("DivBoundary");
+  divBoundaryDomObject.innerHTML = "";
+}
+
+function HandlePlayPauseButtonClickEvent() {
+  if(document.getElementById("PlayPauseButton").innerHTML == "Pause") {
+    document.getElementById("PlayPauseButton").innerHTML = "Play"
+
+    clearInterval(EngineTimer);
+  } else {
+    document.getElementById("PlayPauseButton").innerHTML = "Pause"
+
+    CreateEngine();
+  }
+}
+
+function HandleRefreshButtonClickEvent() {
+
+  //location.reload();
+
+  Boundary = null;
+  Teams = null;
+  Sprites = null;
+  Projectiles = new Array();
+
+  var divBoundaryDomObject = document.getElementById("DivBoundary");
+  divBoundaryDomObject.innerHTML = "";
+
+  clearInterval(EngineTimer);
+
+
+
+
+
+  NumberOfTeams = GetNumberOfTeamsTextboxValue();
+  NumberOfSpritesPerTeam = GetNumberOfSpritesTextboxValue();
+  MillisecondsBetweenFrames = Math.round(1000 / GetFramesPerSecondTextboxValue());
+  RadiusOfSprites = GetRadiusOfSpritesTextboxValue();
+  MassOfSprites = GetMassOfSpritesTextboxValue();
+  GravitationalConstant = GetGravitationalConstantTextboxValue();
+  EquilibriumDistance = GetEquilibriumDistanceTextboxValue();
+  FieldFriction = GetFieldFrictionTextboxValue();
+
+  StickyBoundries = document.getElementById("StickyBoundriesCheckbox").checked;
+  ShowCenterOfMass = document.getElementById("ShowCenterOfMassCheckbox").checked;
+  ShowHighlight = document.getElementById("ShowHighlightCheckbox").checked;
+  ShowTrails = document.getElementById("ShowTrailsCheckbox").checked;
+  UseForce = document.getElementById("ForceCheckbox").checked;
+
+  OnLoading();
+}
+
+
+</script>
+</head>
+<body onload="OnLoading();">
+
+<table>
+  <tr>
+    <td>
+      <label>
+        Number of Teams
+      </label>
+    </td>
+    <td>
+      <input type="textbox" id="NumberOfTeamsTextbox" value="1" style="width: 40px; height: 30px;" />
+    </td>
+    <td>
+    </td>
+  </tr>
+  <tr>
+    <td>
+      <label>
+        Number of Sprites per Team
+      </label>
+    </td>
+    <td>
+      <input type="textbox" id="NumberOfSpritesTextbox" value="10" style="width: 40px; height: 30px;" />
+    </td>
+    <td>
+    </td>
+  </tr>
+  <tr>
+    <td>
+      <label>
+        Frames per Second
+      </label>
+    </td>
+    <td>
+      <input type="textbox" id="FramesPerSecondTextbox" value="50" style="width: 40px; height: 30px;" />
+    </td>
+    <td>
+    </td>
+  </tr>
+  <tr>
+    <td>
+      <label>
+        Number of Frames to Skip
+      </label>
+    </td>
+    <td>
+      <input type="textbox" id="NumberOfFramesToSkipTextbox" value="0" style="width: 40px; height: 30px;" />
+    </td>
+    <td>
+      <label id="SkippedPercentageLabel" >
+      </label>
+    </td>
+  </tr>
+  <tr>
+    <td>
+      <label>
+        Radius of Sprites
+      </label>
+    </td>
+    <td>
+      <input type="textbox" id="RadiusOfSpritesTextbox" value="4" style="width: 40px; height: 30px;" />
+    </td>
+    <td>
+    </td>
+  </tr>
+  <tr>
+    <td>
+      <label>
+        Mass of Sprites
+      </label>
+    </td>
+    <td>
+      <input type="textbox" id="MassOfSpritesTextbox" value="1" style="width: 40px; height: 30px;" />
+    </td>
+    <td>
+    </td>
+  </tr>
+  <tr>
+    <td>
+      <label>
+        Gravitational Constant
+      </label>
+    </td>
+    <td>
+      <input type="textbox" id="GravitationalConstantTextbox" value="10" style="width: 40px; height: 30px;" />
+    </td>
+    <td>
+    </td>
+  </tr>
+  <tr>
+    <td>
+      <label>
+        Equilibrium Distance
+      </label>
+    </td>
+    <td>
+      <input type="textbox" id="EquilibriumDistanceTextbox" value="30" style="width: 40px; height: 30px;" />
+    </td>
+    <td>
+    </td>
+  </tr>
+  <tr>
+    <td>
+      <label>
+        Custom Formula (F = ?)
+      </label>
+    </td>
+    <td>
+      <input type="textbox" id="CustomFormulaTextbox" value="G*m1*m2*(d-P)/d^3" style="width: 150px; height: 30px;" />
+    </td>
+    <td>
+    </td>
+  </tr>
+  <tr>
+    <td>
+      <label>
+        Field Friction
+      </label>
+    </td>
+    <td>
+      <input type="textbox" id="FieldFrictionTextbox" value="0.001" style="width: 40px; height: 30px;" />
+    </td>
+    <td>
+    </td>
+  </tr>
+  <tr>
+    <td>
+      <label>
+        Sticky Boundries
+      </label>
+    </td>
+    <td>
+      <input type="checkbox" id="StickyBoundriesCheckbox" checked="checked" />
+    </td>
+    <td>
+    </td>
+  </tr>
+  <tr>
+    <td>
+      <label>
+        Show Center of Mass
+      </label>
+    </td>
+    <td>
+      <input type="checkbox" id="ShowCenterOfMassCheckbox" />
+    </td>
+    <td>
+    </td>
+  </tr>
+  <tr style="display: none;">
+    <td>
+      <label>
+        Show Highlight
+      </label>
+    </td>
+    <td>
+      <input type="checkbox" id="ShowHighlightCheckbox" />
+    </td>
+    <td>
+    </td>
+  </tr>
+  <tr>
+    <td>
+      <label>
+        Show Trails
+      </label>
+    </td>
+    <td>
+      <input type="checkbox" id="ShowTrailsCheckbox" />
+    </td>
+    <td>
+    </td>
+  </tr>
+  <tr>
+    <td>
+      <label>
+        Force (No AI)
+      </label>
+    </td>
+    <td>
+      <input type="checkbox" id="ForceCheckbox" checked="checked" />
+    </td>
+    <td>
+    </td>
+  </tr>
+  <tr>
+    <td>
+      <button id="HighlightNextButton" onclick="HighlightNextButtonClickEvent();" 
+        style="width: 120px; height 40px; border: solid 1px #000;">
+        Highlight Next
+      </button>
+    </td>
+    <td>
+    </td>
+    <td>
+    </td>
+  </tr>
+  <tr>
+    <td>
+      <button id="ClearTrailButton" onclick="HandleClearTrailButtonClickEvent();" 
+        style="width: 100px; height 40px; border: solid 1px #000;">
+        Clear Trail
+      </button>
+    </td>
+    <td>
+    </td>
+    <td>
+    </td>
+  </tr>
+  <tr>
+    <td>
+      <button id="PlayPauseButton" onclick="HandlePlayPauseButtonClickEvent();" 
+        style="width: 80px; height 40px; border: solid 1px #000;">
+        Pause
+      </button>
+    </td>
+    <td>
+    </td>
+    <td>
+    </td>
+  </tr>
+  <tr>
+    <td>
+      <button id="RestartButton" onclick="HandleRefreshButtonClickEvent();" 
+        style="width: 80px; height 40px; border: solid 1px #000;">
+        Restart
+      </button>
+    </td>
+    <td>
+    </td>
+    <td>
+    </td>
+  </tr>
+  <tr>
+    <td>
+      <label>
+        Debug
+      </label>
+    </td>
+    <td>
+      <label id="DebugLabel" >
+      </label>
+    </td>
+    <td>
+    </td>
+  </tr>
+</table>
+
+<div id="DivBoundary" style="position: absolute; top: 100px; left: 350px; border: solid 1px #000;">
+</div>
+</body>
+</html>                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  
